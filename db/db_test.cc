@@ -6,6 +6,9 @@
 
 #include <atomic>
 #include <cinttypes>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "gtest/gtest.h"
@@ -16,6 +19,7 @@
 #include "leveldb/cache.h"
 #include "leveldb/env.h"
 #include "leveldb/filter_policy.h"
+#include "leveldb/options.h"
 #include "leveldb/table.h"
 #include "port/port.h"
 #include "port/thread_annotations.h"
@@ -268,6 +272,7 @@ class DBTest : public testing::Test {
   DBTest() : env_(new SpecialEnv(Env::Default())), option_config_(kDefault) {
     filter_policy_ = NewBloomFilterPolicy(10);
     dbname_ = testing::TempDir() + "db_test";
+    
     DestroyDB(dbname_, Options());
     db_ = nullptr;
     Reopen();
@@ -697,6 +702,41 @@ TEST_F(DBTest, GetIdenticalSnapshots) {
       db_->ReleaseSnapshot(s3);
     }
   } while (ChangeOptions());
+}
+
+TEST_F(DBTest, GetPutBinaryData) {
+  do {
+  Options options = CurrentOptions();
+  options.compression = kZstdCompression;
+  options.zstd_compression_level = 22;
+  options.write_buffer_size = 100000;  // Small write buffer
+  options.create_if_missing = true;
+  DestroyAndReopen(&options);
+  int32_t int_column_data = 123456789;
+  double_t double_column_data = 1.34;
+  char str1[20];
+  int64_t tmpI64;
+  tmpI64 = -2354;
+  memset(str1, '1', 20);
+  memcpy(str1, &tmpI64, sizeof(int64_t));
+  memcpy(str1 + 8, &tmpI64, sizeof(int64_t));
+  char* int_column_data_str = (char*)(malloc(sizeof(int32_t)));
+  *(int32_t*)int_column_data_str = int_column_data;
+  char* double_column_data_str = (char*)(malloc(sizeof(double_t)));
+  *(double_t*)double_column_data_str = double_column_data;
+  ASSERT_LEVELDB_OK(db_->Put(WriteOptions(), "int", Slice(int_column_data_str, sizeof(int32_t))));
+  ASSERT_LEVELDB_OK(db_->Put(WriteOptions(), "double", Slice(double_column_data_str, sizeof(double_t))));
+  ASSERT_LEVELDB_OK(db_->Put(WriteOptions(), "str", Slice(str1, 20)));
+  std::string value;
+  value = Get("int");
+  ASSERT_EQ(*(int32_t*)value.data(), int_column_data);
+  value.clear();
+  const char* cVal = Get("double").data();
+  // ASSERT_EQ(std::strcmp(cVal,double_column_data_str), 0);
+  ASSERT_EQ(*((double_t*)cVal), double_column_data);
+  value = Get("str");
+  ASSERT_EQ(value, std::string(str1, 20));
+  } while(ChangeOptions());
 }
 
 TEST_F(DBTest, IterateOverEmptySnapshot) {
@@ -1635,6 +1675,8 @@ TEST_F(DBTest, CustomComparator) {
     Compact("[0]", "[1000000]");
   }
 }
+
+
 
 TEST_F(DBTest, ManualCompaction) {
   ASSERT_EQ(config::kMaxMemCompactLevel, 2)
